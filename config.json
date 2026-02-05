@@ -1,0 +1,23 @@
+{
+  "rpc_url": "https://atlantic.dplabs-internal.com",
+  "api_base_url": "https://api.pharosnetwork.xyz",
+  "dodo_api_base_url": "https://api.dodoex.io/route-service/v2/widget/getdodoroute",
+  "usdt_address": "0xE7E84B8B4f39C507499c40B4ac199B050e2882d5",
+  "cash_address": "0x56f4add11d723412D27A9e9433315401B351d6E3",
+  "wphrs_address": "0x838800b758277cc111b2d48ab01e5e164f8e9471",
+  "dodo_proxy": "0x819829e5CF6e19F9fED92F6b4CC1edF45a2cC4A2",
+  "router_address": "0xb93Cd1E38809607a00FF9CaB633db5CAA6130dD0",
+  "settings": {
+    "max_gas_price_gwei": "50",
+    "min_delay_ms": 5000,
+    "max_delay_ms": 15000,
+    "retry_attempts": 3,
+    "anti_bot_mode": true
+  },
+  "modules": {
+    "grandline_nft": true,
+    "contract_health_checker": true,
+    "auto_swap": true,
+    "liquidity_provider": true
+  }
+}
