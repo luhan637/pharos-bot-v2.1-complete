@@ -1,0 +1,7 @@
+[
+  {
+    "address": "0xYourWalletAddress1",
+    "privateKey": "0xYourPrivateKey1",
+    "proxy": "http://user:pass@host:port"
+  }
+]
