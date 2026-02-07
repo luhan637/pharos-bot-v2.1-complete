@@ -1,0 +1,2956 @@
+import blessed from "blessed";
+import figlet from "figlet";
+import { ethers } from "ethers";
+import fs from "fs";
+import axios from "axios";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { SocksProxyAgent } from "socks-proxy-agent";
+
+const RPC_URL = "https://atlantic.dplabs-internal.com";
+const API_BASE_URL = "https://api.pharosnetwork.xyz";
+const DODO_API_BASE_URL = "https://api.dodoex.io/route-service/v2/widget/getdodoroute";
+const CONFIG_FILE = "config.json";
+const isDebug = false;
+const USDT_CONTRACT_ADDRESS = "0xE7E84B8B4f39C507499c40B4ac199B050e2882d5";
+const CASH_CONTRACT_ADDRESS = "0x56f4add11d723412D27A9e9433315401B351d6E3";
+const WPHRS_CONTRACT_ADDRESS = "0x838800b758277cc111b2d48ab01e5e164f8e9471";
+const NATIVE_TOKEN_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+const DODO_PROXY_ADDRESS = "0x819829e5CF6e19F9fED92F6b4CC1edF45a2cC4A2";
+const ROUTER_ADDRESS = "0xb93Cd1E38809607a00FF9CaB633db5CAA6130dD0";
+const PAIR_ADDRESS = "0xd7a53400494cfdd71daf5aff8bd19d8e7efd62b4";
+const CONTRACT_ABI = [
+  {
+    "inputs": [
+      { "internalType": "address", "name": "owner", "type": "address" },
+      { "internalType": "address", "name": "spender", "type": "address" }
+    ],
+    "name": "allowance",
+    "outputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "spender", "type": "address" },
+      { "internalType": "uint256", "name": "value", "type": "uint256" }
+    ],
+    "name": "approve",
+    "outputs": [
+      { "internalType": "bool", "name": "", "type": "bool" }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "account", "type": "address" }
+    ],
+    "name": "balanceOf",
+    "outputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "decimals",
+    "outputs": [
+      { "internalType": "uint8", "name": "", "type": "uint8" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "uAddress", "type": "address" },
+      { "internalType": "uint256", "name": "tokenAmount", "type": "uint256" }
+    ],
+    "name": "redemption",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "uAddress", "type": "address" },
+      { "internalType": "uint256", "name": "uAmount", "type": "uint256" }
+    ],
+    "name": "subscribe",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+];
+
+const ROUTER_ABI = [
+  {
+    "inputs": [
+      { "internalType": "address", "name": "tokenA", "type": "address" },
+      { "internalType": "address", "name": "tokenB", "type": "address" },
+      { "internalType": "uint256", "name": "fee", "type": "uint256" },
+      { "internalType": "uint256", "name": "amountADesired", "type": "uint256" },
+      { "internalType": "uint256", "name": "amountBDesired", "type": "uint256" },
+      { "internalType": "uint256", "name": "amountAMin", "type": "uint256" },
+      { "internalType": "uint256", "name": "amountBMin", "type": "uint256" },
+      { "internalType": "address", "name": "to", "type": "address" },
+      { "internalType": "uint256", "name": "deadline", "type": "uint256" }
+    ],
+    "name": "addLiquidity",
+    "outputs": [
+      { "internalType": "uint256", "name": "amountA", "type": "uint256" },
+      { "internalType": "uint256", "name": "amountB", "type": "uint256" },
+      { "internalType": "uint256", "name": "liquidity", "type": "uint256" }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+];
+
+const PAIR_ABI = [
+  {
+    "constant": true,
+    "inputs": [],
+    "name": "getReserves",
+    "outputs": [
+      { "internalType": "uint112", "name": "_reserve0", "type": "uint112" },
+      { "internalType": "uint112", "name": "_reserve1", "type": "uint112" },
+      { "internalType": "uint32", "name": "_blockTimestampLast", "type": "uint32" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [],
+    "name": "token0",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [],
+    "name": "token1",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+];
+
+let walletInfo = {
+  address: "N/A",
+  balancePHRS: "0.00",
+  activeAccount: "N/A",
+  cycleCount: 0,
+  nextCycle: "N/A"
+};
+let transactionLogs = [];
+let activityRunning = false;
+let isCycleRunning = false;
+let shouldStop = false;
+let dailyActivityInterval = null;
+let privateKeys = [];
+let proxies = [];
+let walletAddresses = [];
+let selectedWalletIndex = 0;
+let loadingSpinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const borderBlinkColors = ["cyan", "blue", "magenta", "red", "yellow", "green"];
+let borderBlinkIndex = 0;
+let blinkCounter = 0;
+let spinnerIndex = 0;
+let nonceTracker = {};
+let hasLoggedSleepInterrupt = false;
+let accountJwts = {};
+let isHeaderRendered = false;
+let activeProcesses = 0;
+
+let dailyActivityConfig = {
+  sendPhrsRepetitions: 1,
+  minSendAmount: 0.0001,
+  maxSendAmount: 0.0002,
+  swapRepetitions: 1,
+  minUsdtSwapAmount: 0.001,
+  maxUsdtSwapAmount: 0.003,
+  minCashSwapAmount: 0.001,
+  maxCashSwapAmount: 0.003,
+  farosSwapRepetitions: 1,
+  minPhrsSwapAmount: 0.0001,
+  maxPhrsSwapAmount: 0.0002,
+  minUsdtFarosSwapAmount: 0.004,
+  maxUsdtFarosSwapAmount: 0.01,
+  addLpRepetitions: 1,
+  minAddLpAmount: 0.0001,
+  maxAddLpAmount: 0.0003
+};
+
+function getApiHeaders(customHeaders = {}) {
+  return {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+    "Origin": "https://testnet.pharosnetwork.xyz",
+    "Referer": "https://testnet.pharosnetwork.xyz/",
+    ...customHeaders
+  };
+}
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const data = fs.readFileSync(CONFIG_FILE, "utf8");
+      const config = JSON.parse(data);
+      dailyActivityConfig.sendPhrsRepetitions = Number(config.sendPhrsRepetitions) || 1;
+      dailyActivityConfig.minSendAmount = Number(config.minSendAmount) || 0.0001;
+      dailyActivityConfig.maxSendAmount = Number(config.maxSendAmount) || 0.0002;
+      dailyActivityConfig.swapRepetitions = Number(config.swapRepetitions) || 1;
+      dailyActivityConfig.minUsdtSwapAmount = Number(config.minUsdtSwapAmount) || 0.001;
+      dailyActivityConfig.maxUsdtSwapAmount = Number(config.maxUsdtSwapAmount) || 0.003;
+      dailyActivityConfig.minCashSwapAmount = Number(config.minCashSwapAmount) || 0.001;
+      dailyActivityConfig.maxCashSwapAmount = Number(config.maxCashSwapAmount) || 0.003;
+      dailyActivityConfig.farosSwapRepetitions = Number(config.farosSwapRepetitions) || 1;
+      dailyActivityConfig.minPhrsSwapAmount = Number(config.minPhrsSwapAmount) || 0.0001;
+      dailyActivityConfig.maxPhrsSwapAmount = Number(config.maxPhrsSwapAmount) || 0.0002;
+      dailyActivityConfig.minUsdtFarosSwapAmount = Number(config.minUsdtFarosSwapAmount) || 0.004;
+      dailyActivityConfig.maxUsdtFarosSwapAmount = Number(config.maxUsdtFarosSwapAmount) || 0.01;
+      dailyActivityConfig.addLpRepetitions = Number(config.addLpRepetitions) || 1;
+      dailyActivityConfig.minAddLpAmount = Number(config.minAddLpAmount) || 0.0001;
+      dailyActivityConfig.maxAddLpAmount = Number(config.maxAddLpAmount) || 0.0003;
+      addLog(`Loaded Config Successfully`, "success");
+    } else {
+      addLog("No config file found, using default settings.", "info");
+    }
+  } catch (error) {
+    addLog(`Failed to load config: ${error.message}, using default settings.`, "error");
+  }
+}
+
+function saveConfig() {
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(dailyActivityConfig, null, 2));
+    addLog("Configuration saved successfully.", "success");
+  } catch (error) {
+    addLog(`Failed to save config: ${error.message}`, "error");
+  }
+}
+
+process.on("unhandledRejection", (reason, promise) => {
+  addLog(`Unhandled Rejection at: ${promise}, reason: ${reason}`, "error");
+});
+
+process.on("uncaughtException", (error) => {
+  addLog(`Uncaught Exception: ${error.message}\n${error.stack}`, "error");
+  process.exit(1);
+});
+
+function getShortAddress(address) {
+  return address ? address.slice(0, 6) + "..." + address.slice(-4) : "N/A";
+}
+
+function addLog(message, type = "info") {
+  if (type === "debug" && !isDebug) return;
+  const timestamp = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta" });
+  let coloredMessage;
+  switch (type) {
+    case "error":
+      coloredMessage = `{red-fg}${message}{/red-fg}`;
+      break;
+    case "success":
+      coloredMessage = `{green-fg}${message}{/green-fg}`;
+      break;
+    case "wait":
+      coloredMessage = `{yellow-fg}${message}{/yellow-fg}`;
+      break;
+    case "debug":
+      coloredMessage = `{blue-fg}${message}{/blue-fg}`;
+      break;
+    default:
+      coloredMessage = message;
+  }
+  transactionLogs.push(`{bright-cyan-fg}[{/bright-cyan-fg} {bold}{grey-fg}${timestamp}{/grey-fg}{/bold} {bright-cyan-fg}]{/bright-cyan-fg} {bold}${coloredMessage}{/bold}`);
+  updateLogs();
+}
+
+function getShortHash(hash) {
+  return hash.slice(0, 6) + "..." + hash.slice(-4);
+}
+
+function clearTransactionLogs() {
+  transactionLogs = [];
+  addLog("Transaction logs cleared.", "success");
+  updateLogs();
+}
+
+async function sleep(ms) {
+  if (shouldStop) {
+    if (!hasLoggedSleepInterrupt) {
+      addLog("Process stopped successfully.", "info");
+      hasLoggedSleepInterrupt = true;
+    }
+    return;
+  }
+  activeProcesses++;
+  try {
+    await new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve();
+      }, ms);
+      const checkStop = setInterval(() => {
+        if (shouldStop) {
+          clearTimeout(timeout);
+          clearInterval(checkStop);
+          if (!hasLoggedSleepInterrupt) {
+            addLog("Process stopped successfully.", "info");
+            hasLoggedSleepInterrupt = true;
+          }
+          resolve();
+        }
+      }, 100);
+    });
+  } finally {
+    activeProcesses = Math.max(0, activeProcesses - 1);
+  }
+}
+
+function loadPrivateKeys() {
+  try {
+    const data = fs.readFileSync("pk.txt", "utf8");
+    privateKeys = data.split("\n").map(key => key.trim()).filter(key => key.match(/^(0x)?[0-9a-fA-F]{64}$/));
+    if (privateKeys.length === 0) throw new Error("No valid private keys in pk.txt");
+    addLog(`Loaded ${privateKeys.length} private keys from pk.txt`, "success");
+  } catch (error) {
+    addLog(`Failed to load private keys: ${error.message}`, "error");
+    privateKeys = [];
+  }
+}
+
+function loadProxies() {
+  try {
+    const data = fs.readFileSync("proxy.txt", "utf8");
+    proxies = data.split("\n").map(proxy => proxy.trim()).filter(proxy => proxy);
+    if (proxies.length === 0) throw new Error("No proxies found in proxy.txt");
+    addLog(`Loaded ${proxies.length} proxies from proxy.txt`, "success");
+  } catch (error) {
+    addLog(`No proxy.txt found or failed to load, running without proxies: ${error.message}`, "warn");
+    proxies = [];
+  }
+}
+
+function loadWalletAddresses() {
+  try {
+    const data = fs.readFileSync("wallet.txt", "utf8");
+    const addresses = data.split("\n").map(addr => addr.trim()).filter(addr => addr.match(/^0x[0-9a-fA-F]{40}$/));
+    if (addresses.length === 0) throw new Error("No valid addresses in wallet.txt");
+    addLog(`Loaded ${addresses.length} wallet addresses from wallet.txt`, "success");
+    return addresses;
+  } catch (error) {
+    addLog(`No wallet.txt found or failed to load, skipping PHRS transfers: ${error.message}`, "warn");
+    return [];
+  }
+}
+
+function createAgent(proxyUrl) {
+  if (!proxyUrl) return null;
+  if (proxyUrl.startsWith("socks")) {
+    return new SocksProxyAgent(proxyUrl);
+  } else {
+    return new HttpsProxyAgent(proxyUrl);
+  }
+}
+
+function getProviderWithProxy(proxyUrl, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const agent = createAgent(proxyUrl);
+      const fetchOptions = agent ? { agent } : {};
+      const provider = new ethers.JsonRpcProvider(RPC_URL, { chainId: 688689, name: "Pharos Atlantic" }, { fetchOptions });
+      return provider;
+    } catch (error) {
+      addLog(`Attempt ${attempt}/${maxRetries} failed to initialize provider: ${error.message}`, "error");
+      if (attempt < maxRetries) sleep(2000);
+    }
+  }
+  try {
+    addLog(`Proxy failed, falling back to direct connection`, "warn");
+    const provider = new ethers.JsonRpcProvider(RPC_URL, { chainId: 688689, name: "Pharos Atlantic" });
+    return provider;
+  } catch (error) {
+    addLog(`Fallback failed: ${error.message}`, "error");
+    throw new Error("Failed to initialize provider after retries");
+  }
+}
+
+async function makeApiRequest(method, url, data, proxyUrl, customHeaders = {}, maxRetries = 3, retryDelay = 2000, useProxy = true) {
+  activeProcesses++;
+  let lastError = null;
+  try {
+    for (let attempt = 1; attempt <= maxRetries && !shouldStop; attempt++) {
+      try {
+        const agent = useProxy && proxyUrl ? createAgent(proxyUrl) : null;
+        const headers = getApiHeaders(customHeaders);
+        const config = {
+          method,
+          url,
+          data,
+          headers,
+          ...(agent ? { httpsAgent: agent, httpAgent: agent } : {}),
+          timeout: 10000
+        };
+        const response = await axios(config);
+        return response.data;
+      } catch (error) {
+        lastError = error;
+        let errorMessage = `Attempt ${attempt}/${maxRetries} failed for API request to ${url}`;
+        if (error.response) errorMessage += `: HTTP ${error.response.status} - ${JSON.stringify(error.response.data || error.response.statusText)}`;
+        else if (error.request) errorMessage += `: No response received`;
+        else errorMessage += `: ${error.message}`;
+        addLog(errorMessage, "error");
+        if (attempt < maxRetries) {
+          addLog(`Retrying API request in ${retryDelay/1000} seconds...`, "wait");
+          await sleep(retryDelay);
+        }
+      }
+    }
+    throw new Error(`Failed to make API request to ${url} after ${maxRetries} attempts: ${lastError.message}`);
+  } finally {
+    activeProcesses = Math.max(0, activeProcesses - 1);
+  }
+}
+
+async function updateWalletData() {
+  const walletDataPromises = privateKeys.map(async (privateKey, i) => {
+    try {
+      const proxyUrl = proxies[i % proxies.length] || null;
+      const provider = getProviderWithProxy(proxyUrl);
+      const wallet = new ethers.Wallet(privateKey, provider);
+      const phrsBalance = await provider.getBalance(wallet.address).catch(() => 0);
+      const formattedPHRS = Number(ethers.formatEther(phrsBalance)).toFixed(4);
+      let formattedUSDT = "N/A";
+      let formattedCASH = "N/A";
+      let formattedWPHRS = "N/A";
+      try {
+        const usdtBalance = await getTokenBalance(wallet, provider, USDT_CONTRACT_ADDRESS);
+        formattedUSDT = Number(usdtBalance).toFixed(4);
+      } catch (e) {}
+      try {
+        const cashBalance = await getTokenBalance(wallet, provider, CASH_CONTRACT_ADDRESS);
+        formattedCASH = Number(cashBalance).toFixed(4);
+      } catch (e) {}
+      try {
+        const wphrsBalance = await getTokenBalance(wallet, provider, WPHRS_CONTRACT_ADDRESS);
+        formattedWPHRS = Number(wphrsBalance).toFixed(4);
+      } catch (e) {}
+      const formattedEntry = `${i === selectedWalletIndex ? "→ " : "  "}${getShortAddress(wallet.address)}   ${formattedPHRS.padEnd(8)}   ${formattedUSDT.padEnd(8)}   ${formattedCASH.padEnd(8)}   ${formattedWPHRS.padEnd(8)}`;
+      if (i === selectedWalletIndex) {
+        walletInfo.address = wallet.address;
+        walletInfo.activeAccount = `Account ${i + 1}`;
+        walletInfo.balancePHRS = formattedPHRS;
+      }
+      return formattedEntry;
+    } catch (error) {
+      addLog(`Failed to fetch wallet data for account #${i + 1}: ${error.message}`, "error");
+      return `${i === selectedWalletIndex ? "→ " : "  "}N/A 0.00 N/A N/A N/A`;
+    }
+  });
+  const walletData = await Promise.all(walletDataPromises);
+  addLog("Wallet data updated.", "info");
+  return walletData;
+}
+
+async function getNextNonce(provider, walletAddress) {
+  if (shouldStop) {
+    addLog("Nonce fetch stopped due to stop request.", "info");
+    throw new Error("Process stopped");
+  }
+  try {
+    const pendingNonce = await provider.getTransactionCount(walletAddress, "pending");
+    const lastUsedNonce = nonceTracker[walletAddress] || pendingNonce - 1;
+    const nextNonce = Math.max(pendingNonce, lastUsedNonce + 1);
+    nonceTracker[walletAddress] = nextNonce;
+    return nextNonce;
+  } catch (error) {
+    addLog(`Error fetching nonce for ${getShortAddress(walletAddress)}: ${error.message}`, "error");
+    throw error;
+  }
+}
+
+async function loginAccount(wallet, proxyUrl, useProxy = true) {
+  if (shouldStop) {
+    addLog("Login stopped due to stop request.", "info");
+    return false;
+  }
+  try {
+    const pharosMessage = "pharos";
+    const pharosSignature = await wallet.signMessage(pharosMessage);
+    const pharosLoginUrl = `${API_BASE_URL}/user/login?address=${wallet.address}&signature=${pharosSignature}`;
+    const pharosLoginResponse = await makeApiRequest("post", pharosLoginUrl, {}, proxyUrl, {}, 3, 2000, useProxy);
+    
+    if (pharosLoginResponse.code === 0) {
+      accountJwts[wallet.address] = {
+        pharosJwt: pharosLoginResponse.data.jwt
+      };
+      return true;
+    } else {
+      addLog(`Account ${getShortAddress(wallet.address)}: Pharos login failed: ${pharosLoginResponse.msg}`, "error");
+      return false;
+    }
+  } catch (error) {
+    addLog(`Account ${getShortAddress(wallet.address)}: Login error: ${error.message}`, "error");
+    return false;
+  }
+}
+
+async function reportTransaction(walletAddress, txHash) {
+  if (shouldStop) {
+    addLog("Reporting transaction stopped due to stop request.", "info");
+    return;
+  }
+
+  activeProcesses++;
+
+  try {
+    const url = `${API_BASE_URL}/task/verify`;
+    const payload = {
+      address: walletAddress,
+      task_id: 401,
+      tx_hash: txHash
+    };
+    const maxRetries = 5;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries && !shouldStop; attempt++) {
+      try {
+        const headers = {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/plain, */*",
+          "Authorization": `Bearer ${accountJwts[walletAddress]?.pharosJwt}`,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+          "Referer": "https://testnet.pharosnetwork.xyz/",
+          "Origin": "https://testnet.pharosnetwork.xyz"
+        };
+
+        addLog(`Attempt ${attempt}/${maxRetries}: Sending report`, "debug");
+
+        const response = await makeApiRequest(
+          "post",
+          url,
+          payload,
+          null,
+          headers,
+          1,
+          2000,
+          false
+        );
+
+        if (response.code === 0 && response.data?.verified) {
+          addLog(`Transaction reported successfully`, "success");
+          return;
+        } else {
+          lastError = response.msg || 'Unknown error';
+          addLog(`Attempt ${attempt}/${maxRetries} failed: ${lastError}`, "error");
+        }
+      } catch (error) {
+        lastError = error.response?.data || error.message;
+        addLog(`Attempt ${attempt}/${maxRetries} error: ${lastError}`, "error");
+      }
+
+      if (attempt < maxRetries && !shouldStop) {
+        addLog(`Waiting 10 seconds before retrying...`, "wait");
+        await sleep(10000);
+      }
+    }
+
+    if (!shouldStop) {
+      addLog(`Failed to report transaction after ${maxRetries} attempts: ${lastError}`, "error");
+    }
+
+  } finally {
+    activeProcesses = Math.max(0, activeProcesses - 1);
+  }
+}
+
+async function claimFaucetForAccount(wallet, proxyUrl, accountIndex) {
+  addLog(`Processing Claiming Faucet`, "warn");
+
+  if (!accountJwts[wallet.address]) {
+    const loginSuccess = await loginAccount(wallet, proxyUrl);
+    if (!loginSuccess) {
+      addLog(`Account ${accountIndex + 1}: Skipping claim due to login failure.`, "error");
+      return;
+    }
+  }
+
+  try {
+    const statusUrl = `${API_BASE_URL}/faucet/status?address=${wallet.address}`;
+    const statusResponse = await makeApiRequest(
+      "get",
+      statusUrl,
+      null,
+      proxyUrl,
+      { "Authorization": `Bearer ${accountJwts[wallet.address].pharosJwt}` },
+      3,
+      2000,
+      true
+    );
+    if (statusResponse.code === 0) {
+      if (statusResponse.data.is_able_to_faucet) {
+        const claimUrl = `${API_BASE_URL}/faucet/daily`;
+        const claimPayload = { address: wallet.address };
+        const claimResponse = await makeApiRequest(
+          "post",
+          claimUrl,
+          claimPayload,
+          proxyUrl,
+          { "Authorization": `Bearer ${accountJwts[wallet.address].pharosJwt}` },
+          3,
+          2000,
+          true
+        );
+        if (claimResponse.code === 0) {
+          addLog(`Account ${accountIndex + 1}: PHRS faucet claimed successfully.`, "success");
+          await updateWalletData();
+        } else {
+          addLog(`Account ${accountIndex + 1}: Failed to claim PHRS: ${claimResponse.msg}`, "error");
+        }
+      } else {
+        const cooldownTime = statusResponse.data.avaliable_timestamp
+          ? Math.round((statusResponse.data.avaliable_timestamp * 1000 - Date.now()) / (1000 * 60 * 60)) + " hours"
+          : "unknown";
+        addLog(`Account ${accountIndex + 1}: Already Claimed Today. Next claim available in ${cooldownTime}.`, "wait");
+      }
+    } else {
+      addLog(`Account ${accountIndex + 1}: Failed to check faucet status: ${statusResponse.msg}`, "error");
+    }
+  } catch (error) {
+    addLog(`Account ${accountIndex + 1}: Faucet status check error: ${error.message}`, "error");
+  }
+}
+
+
+async function approveToken(wallet, provider, tokenAddress, spenderAddress, amount) {
+  try {
+    const tokenContract = new ethers.Contract(tokenAddress, CONTRACT_ABI, wallet);
+    const allowance = await tokenContract.allowance(wallet.address, spenderAddress);
+    if (allowance < amount) {
+      const tx = await tokenContract.approve(spenderAddress, amount, {
+        gasLimit: 100000,
+        maxFeePerGas: ethers.parseUnits("1", "gwei"),
+        maxPriorityFeePerGas: ethers.parseUnits("0.5", "gwei"),
+        nonce: await getNextNonce(provider, wallet.address)
+      });
+      await tx.wait();
+      addLog(`Approved Token Successfully. Hash: ${getShortHash(tx.hash)}`, "success");
+    }
+  } catch (error) {
+    addLog(`Failed to approve token: ${error.message}`, "error");
+    throw error;
+  }
+}
+
+async function performSubscribe(wallet, provider, amountInWei) {
+  try {
+    const cashContract = new ethers.Contract(CASH_CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
+    const tx = await cashContract.subscribe(USDT_CONTRACT_ADDRESS, amountInWei, {
+      gasLimit: 200000,
+      maxFeePerGas: ethers.parseUnits("1", "gwei"),
+      maxPriorityFeePerGas: ethers.parseUnits("0.5", "gwei"),
+      nonce: await getNextNonce(provider, wallet.address)
+    });
+    await tx.wait();
+    addLog(`Subscribed USDT ➯ CASH+ Successfully. Hash: ${getShortHash(tx.hash)}`, "success");
+    await updateWalletData();
+  } catch (error) {
+    addLog(`Subscribe failed: ${error.message}`, "error");
+    throw error;
+  }
+}
+
+async function performRedemption(wallet, provider, amountInWei) {
+  try {
+    const cashContract = new ethers.Contract(CASH_CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
+    const tx = await cashContract.redemption(USDT_CONTRACT_ADDRESS, amountInWei, {
+      gasLimit: 200000,
+      maxFeePerGas: ethers.parseUnits("1", "gwei"),
+      maxPriorityFeePerGas: ethers.parseUnits("0.5", "gwei"),
+      nonce: await getNextNonce(provider, wallet.address)
+    });
+    await tx.wait();
+    addLog(`Redeemed CASH+ ➯ USDT Successfully. Hash: ${getShortHash(tx.hash)}`, "success");
+    await updateWalletData();
+  } catch (error) {
+    addLog(`Redemption failed: ${error.message}`, "error");
+    throw error;
+  }
+}
+
+async function getTokenBalance(wallet, provider, tokenAddress) {
+  try {
+    const tokenContract = new ethers.Contract(tokenAddress, CONTRACT_ABI, provider);
+    const balance = await tokenContract.balanceOf(wallet.address);
+    const decimals = await tokenContract.decimals();
+    return ethers.formatUnits(balance, decimals);
+  } catch (error) {
+    addLog(`Failed to get balance for ${tokenAddress}: ${error.message}`, "error");
+    return "N/A";
+  }
+}
+
+async function getDodoQuote(walletAddress, fromToken, toToken, fromAmount) {
+  try {
+    const params = {
+      chainId: 688689,
+      deadLine: Math.floor(Date.now() / 1000) + 3600 * 24,
+      apikey: "a37546505892e1a952",
+      slippage: 3.225,
+      source: "dodoV2AndMixWasm",
+      toTokenAddress: toToken,
+      fromTokenAddress: fromToken,
+      userAddr: walletAddress,
+      estimateGas: true,
+      fromAmount: fromAmount.toString()
+    };
+    const response = await axios.get(DODO_API_BASE_URL, { params });
+    if (response.data.status === 200) {
+      return response.data.data;
+    } else {
+      throw new Error(`DODO API error: ${JSON.stringify(response.data)}`);
+    }
+  } catch (error) {
+    addLog(`Failed to get DODO quote: ${error.message}`, "error");
+    throw error;
+  }
+}
+
+async function performFarosSwap(wallet, provider, isPhrsToUsdt, amountInWei) {
+  const fromToken = isPhrsToUsdt ? NATIVE_TOKEN_ADDRESS : USDT_CONTRACT_ADDRESS;
+  const toToken = isPhrsToUsdt ? USDT_CONTRACT_ADDRESS : NATIVE_TOKEN_ADDRESS;
+  const decimals = isPhrsToUsdt ? 18 : 6;
+  const amountStr = ethers.formatUnits(amountInWei, decimals);
+  const fromBalance = isPhrsToUsdt ? ethers.formatEther(await provider.getBalance(wallet.address)) : await getTokenBalance(wallet, provider, fromToken);
+  if (parseFloat(fromBalance) < parseFloat(amountStr)) {
+    addLog(`Insufficient balance for Faros swap: ${fromBalance} < ${amountStr}`, "error");
+    return false;
+  }
+
+  try {
+    const quote = await getDodoQuote(wallet.address, fromToken, toToken, amountInWei);
+    if (!quote.data) {
+      addLog("No data in quote from DODO API", "error");
+      return false;
+    }
+
+    if (!isPhrsToUsdt && quote.targetApproveAddr) {
+      await approveToken(wallet, provider, USDT_CONTRACT_ADDRESS, quote.targetApproveAddr, amountInWei);
+    }
+
+    const tx = await wallet.sendTransaction({
+      to: quote.to,
+      data: quote.data,
+      value: BigInt(quote.value || 0),
+      gasLimit: BigInt(quote.gasLimit) * BigInt(2),
+      maxFeePerGas: ethers.parseUnits("1", "gwei"),
+      maxPriorityFeePerGas: ethers.parseUnits("0.5", "gwei"),
+      nonce: await getNextNonce(provider, wallet.address)
+    });
+    await tx.wait();
+    addLog(`Faros Swap ${isPhrsToUsdt ? 'PHRS ➯ USDT' : 'USDT ➯ PHRS'} Successfully. Hash: ${getShortHash(tx.hash)}`, "success");
+    await reportTransaction(wallet.address, tx.hash);
+    await updateWalletData();
+    return true;
+  } catch (error) {
+    addLog(`Faros Swap failed: ${error.message}. Reason: ${error.reason || 'unknown'}`, "error");
+    return false;
+  }
+}
+
+async function performAddLp(wallet, provider, amountInWei) {
+  const tokenA = WPHRS_CONTRACT_ADDRESS;
+  const tokenB = USDT_CONTRACT_ADDRESS;
+  const fee = 1n;
+  const slippage = 0.005;
+
+  try {
+    const pairContract = new ethers.Contract(PAIR_ADDRESS, PAIR_ABI, provider);
+    const [reserve0, reserve1] = await pairContract.getReserves();
+    const token0 = await pairContract.token0();
+    let reserveA, reserveB;
+    if (token0.toLowerCase() === tokenA.toLowerCase()) {
+      reserveA = reserve0;
+      reserveB = reserve1;
+    } else {
+      reserveA = reserve1;
+      reserveB = reserve0;
+    }
+
+    const amountADesired = amountInWei;
+    const amountBDesired = (amountADesired * reserveB) / reserveA;
+    const amountAMin = amountADesired * BigInt(Math.floor((1 - slippage) * 1e18)) / BigInt(1e18);
+    const amountBMin = amountBDesired * BigInt(Math.floor((1 - slippage) * 1e6)) / BigInt(1e6);
+    await approveToken(wallet, provider, tokenA, ROUTER_ADDRESS, amountADesired);
+    await approveToken(wallet, provider, tokenB, ROUTER_ADDRESS, amountBDesired);
+
+    const routerContract = new ethers.Contract(ROUTER_ADDRESS, ROUTER_ABI, wallet);
+    const tx = await routerContract.addLiquidity(
+      tokenA,
+      tokenB,
+      fee,
+      amountADesired,
+      amountBDesired,
+      amountAMin,
+      amountBMin,
+      wallet.address,
+      BigInt(Math.floor(Date.now() / 1000) + 3600),
+      {
+        gasLimit: 300000,
+        maxFeePerGas: ethers.parseUnits("1", "gwei"),
+        maxPriorityFeePerGas: ethers.parseUnits("0.5", "gwei"),
+        nonce: await getNextNonce(provider, wallet.address)
+      }
+    );
+    await tx.wait();
+    addLog(`Added LP WPHRS/USDT Successfully. Hash: ${getShortHash(tx.hash)}`, "success");
+    await updateWalletData();
+    return true;
+  } catch (error) {
+    addLog(`Add LP failed: ${error.message}`, "error");
+    return false;
+  }
+}
+
+async function runDailyActivity() {
+  if (privateKeys.length === 0) {
+    addLog("No valid private keys found.", "error");
+    return;
+  }
+  addLog(`Starting daily activity for all accounts. Auto Send PHRS: ${dailyActivityConfig.sendPhrsRepetitions}, Auto Swap: ${dailyActivityConfig.swapRepetitions}, Auto Faros Swap: ${dailyActivityConfig.farosSwapRepetitions}, Auto Add LP: ${dailyActivityConfig.addLpRepetitions}`, "info");
+  activityRunning = true;
+  isCycleRunning = true;
+  shouldStop = false;
+  hasLoggedSleepInterrupt = false;
+  activeProcesses = Math.max(0, activeProcesses);
+  updateMenu();
+  try {
+    for (let accountIndex = 0; accountIndex < privateKeys.length && !shouldStop; accountIndex++) {
+      addLog(`Starting processing for account ${accountIndex + 1}`, "info");
+      selectedWalletIndex = accountIndex;
+      const proxyUrl = proxies[accountIndex % proxies.length] || null;
+      let provider;
+      addLog(`Account ${accountIndex + 1}: Using Proxy ${proxyUrl || "none"}...`, "info");
+      try {
+        provider = getProviderWithProxy(proxyUrl);
+        await provider.getNetwork();
+        addLog(`Provider connection verified for account ${accountIndex + 1}`, "info");
+      } catch (error) {
+        addLog(`Failed to connect to provider for account ${accountIndex + 1}: ${error.message}`, "error");
+        continue;
+      }
+      const wallet = new ethers.Wallet(privateKeys[accountIndex], provider);
+      addLog(`Processing account ${accountIndex + 1}: ${getShortAddress(wallet.address)}`, "info");
+      const loginSuccess = await loginAccount(wallet, proxyUrl);
+      if (!loginSuccess) {
+        addLog(`Account ${accountIndex + 1}: Skipping daily activity due to login failure.`, "error");
+        continue;
+      }
+      if (!shouldStop) {
+        await claimFaucetForAccount(wallet, proxyUrl, accountIndex);
+      }
+
+      if (!shouldStop) {
+        const randomDelay = Math.floor(Math.random() * (12000 - 8000 + 1)) + 8000;
+        addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before next process...`, "wait");
+        await sleep(randomDelay);
+      }
+
+      if (!shouldStop) {
+        let successfulTransfers = 0;
+        if (walletAddresses.length > 0) {
+          for (let i = 0; i < dailyActivityConfig.sendPhrsRepetitions && !shouldStop; i++) {
+            let recipient;
+            do {
+              recipient = walletAddresses[Math.floor(Math.random() * walletAddresses.length)];
+            } while (recipient.toLowerCase() === wallet.address.toLowerCase());
+            const amount = ethers.parseEther((Math.random() * (dailyActivityConfig.maxSendAmount - dailyActivityConfig.minSendAmount) + dailyActivityConfig.minSendAmount).toFixed(6));
+            try {
+              const balance = await provider.getBalance(wallet.address);
+              if (balance < amount) {
+                addLog(`Account ${accountIndex + 1}: Insufficient PHRS balance for transfer (${ethers.formatEther(balance)} PHRS)`, "error");
+                continue;
+              }
+              addLog(`Account ${accountIndex + 1}: Sending ${ethers.formatEther(amount)} PHRS to ${getShortAddress(recipient)}...`, "info");
+              const feeData = await provider.getFeeData();
+              const tx = await wallet.sendTransaction({
+                to: recipient,
+                value: amount,
+                gasLimit: 21000,
+                maxFeePerGas: feeData.maxFeePerGas || ethers.parseUnits("1", "gwei"),
+                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || ethers.parseUnits("0.5", "gwei"),
+                nonce: await getNextNonce(provider, wallet.address)
+              });
+              addLog(`Account ${accountIndex + 1}: Sent ${ethers.formatEther(amount)} PHRS to ${getShortAddress(recipient)}. Hash: ${getShortHash(tx.hash)}`, "success");
+              await tx.wait();
+              successfulTransfers++;
+              await reportTransaction(wallet.address, tx.hash);
+              await updateWalletData();
+            } catch (error) {
+              addLog(`Account ${accountIndex + 1}: Failed to send PHRS to ${getShortAddress(recipient)}: ${error.message}`, "error");
+            }
+            if (i < dailyActivityConfig.sendPhrsRepetitions - 1 && !shouldStop) {
+              const randomDelay = Math.floor(Math.random() * (30000 - 15000 + 1)) + 15000;
+              addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before next send...`, "wait");
+              await sleep(randomDelay);
+            }
+          }
+          addLog(`Account ${accountIndex + 1}: Completed ${successfulTransfers} successful PHRS transfers.`, "success");
+        } else {
+          addLog(`No wallet addresses loaded, skipping Auto Send PHRS for account ${accountIndex + 1}.`, "warn");
+        }
+      }
+
+      if (!shouldStop) {
+        const randomDelay = Math.floor(Math.random() * (12000 - 8000 + 1)) + 8000;
+        addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before starting swap...`, "wait");
+        await sleep(randomDelay);
+      }
+
+      if (!shouldStop) {
+        addLog(`Account ${accountIndex + 1}: Starting Auto Swap ${dailyActivityConfig.swapRepetitions} times.`, "info");
+        let successfulSwaps = 0;
+        for (let i = 0; i < dailyActivityConfig.swapRepetitions && !shouldStop; i++) {
+          const isSubscribe = i % 2 === 0; 
+          const minAmount = isSubscribe ? dailyActivityConfig.minUsdtSwapAmount : dailyActivityConfig.minCashSwapAmount;
+          const maxAmount = isSubscribe ? dailyActivityConfig.maxUsdtSwapAmount : dailyActivityConfig.maxCashSwapAmount;
+          const amount = Math.random() * (maxAmount - minAmount) + minAmount;
+          const decimals = isSubscribe ? 6 : 18;
+          const amountStr = amount.toFixed(4);
+          const amountInWei = ethers.parseUnits(amountStr, decimals);
+          const fromToken = isSubscribe ? 'USDT' : 'CASH+';
+          const toToken = isSubscribe ? 'CASH+' : 'USDT';
+          addLog(`Account ${accountIndex + 1}: Swapping ${amountStr} ${fromToken} to ${toToken}...`, "info");
+          try {
+            if (isSubscribe) {
+              const usdtBalance = await getTokenBalance(wallet, provider, USDT_CONTRACT_ADDRESS);
+              if (parseFloat(usdtBalance) < amount) {
+                addLog(`Account ${accountIndex + 1}: Insufficient USDT balance for swap (${usdtBalance} USDT)`, "error");
+                continue;
+              }
+              await approveToken(wallet, provider, USDT_CONTRACT_ADDRESS, CASH_CONTRACT_ADDRESS, amountInWei);
+              await performSubscribe(wallet, provider, amountInWei);
+            } else {
+              const cashBalance = await getTokenBalance(wallet, provider, CASH_CONTRACT_ADDRESS);
+              if (parseFloat(cashBalance) < amount) {
+                addLog(`Account ${accountIndex + 1}: Insufficient CASH+ balance for swap (${cashBalance} CASH+)`, "error");
+                continue;
+              }
+              await performRedemption(wallet, provider, amountInWei);
+            }
+            successfulSwaps++;
+          } catch (error) {
+            addLog(`Account ${accountIndex + 1}: Swap failed: ${error.message}`, "error");
+          }
+          if (i < dailyActivityConfig.swapRepetitions - 1 && !shouldStop) {
+            const randomDelay = Math.floor(Math.random() * (30000 - 15000 + 1)) + 15000;
+            addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before next swap...`, "wait");
+            await sleep(randomDelay);
+          }
+        }
+        addLog(`Account ${accountIndex + 1}: Completed ${successfulSwaps} successful swaps.`, "success");
+      }
+
+      if (!shouldStop) {
+        const randomDelay = Math.floor(Math.random() * (12000 - 8000 + 1)) + 8000;
+        addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before starting Faros swap...`, "wait");
+        await sleep(randomDelay);
+      }
+
+      if (!shouldStop) {
+        addLog(`Account ${accountIndex + 1}: Starting Auto Faros Swap ${dailyActivityConfig.farosSwapRepetitions} times.`, "info");
+        let successfulFarosSwaps = 0;
+        for (let i = 0; i < dailyActivityConfig.farosSwapRepetitions && !shouldStop; i++) {
+          const isPhrsToUsdt = i % 2 === 0;
+          const minAmount = isPhrsToUsdt ? dailyActivityConfig.minPhrsSwapAmount : dailyActivityConfig.minUsdtFarosSwapAmount;
+          const maxAmount = isPhrsToUsdt ? dailyActivityConfig.maxPhrsSwapAmount : dailyActivityConfig.maxUsdtFarosSwapAmount;
+          const amount = Math.random() * (maxAmount - minAmount) + minAmount;
+          const decimals = isPhrsToUsdt ? 18 : 6;
+          const amountStr = amount.toFixed(4);
+          const amountInWei = ethers.parseUnits(amountStr, decimals);
+          addLog(`Account ${accountIndex + 1}: Faros Swapping ${amountStr} ${isPhrsToUsdt ? 'PHRS' : 'USDT'}...`, "info");
+          const success = await performFarosSwap(wallet, provider, isPhrsToUsdt, amountInWei);
+          if (success) successfulFarosSwaps++;
+          if (i < dailyActivityConfig.farosSwapRepetitions - 1 && !shouldStop) {
+            const randomDelay = Math.floor(Math.random() * (30000 - 15000 + 1)) + 15000;
+            addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before next Faros swap...`, "wait");
+            await sleep(randomDelay);
+          }
+        }
+        addLog(`Account ${accountIndex + 1}: Completed ${successfulFarosSwaps} successful Faros swaps.`, "success");
+      }
+
+      if (!shouldStop) {
+        const randomDelay = Math.floor(Math.random() * (12000 - 8000 + 1)) + 8000;
+        addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before starting Add LP...`, "wait");
+        await sleep(randomDelay);
+      }
+
+      if (!shouldStop) {
+        addLog(`Account ${accountIndex + 1}: Starting Auto Add LP ${dailyActivityConfig.addLpRepetitions} times.`, "info");
+        let successfulAddLps = 0;
+        for (let i = 0; i < dailyActivityConfig.addLpRepetitions && !shouldStop; i++) {
+          const minAmount = dailyActivityConfig.minAddLpAmount;
+          const maxAmount = dailyActivityConfig.maxAddLpAmount;
+          const amount = Math.random() * (maxAmount - minAmount) + minAmount;
+          const amountStr = amount.toFixed(4);
+          const amountInWei = ethers.parseUnits(amountStr, 18);
+          addLog(`Account ${accountIndex + 1}: Adding LP ${amountStr} WPHRS...`, "info");
+          const wphrsBalance = await getTokenBalance(wallet, provider, WPHRS_CONTRACT_ADDRESS);
+          if (parseFloat(wphrsBalance) < amount) {
+            addLog(`Account ${accountIndex + 1}: Insufficient WPHRS balance for Add LP (${wphrsBalance} WPHRS)`, "error");
+            continue;
+          }
+          const success = await performAddLp(wallet, provider, amountInWei);
+          if (success) successfulAddLps++;
+          if (i < dailyActivityConfig.addLpRepetitions - 1 && !shouldStop) {
+            const randomDelay = Math.floor(Math.random() * (30000 - 15000 + 1)) + 15000;
+            addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before next Add LP...`, "wait");
+            await sleep(randomDelay);
+          }
+        }
+        addLog(`Account ${accountIndex + 1}: Completed ${successfulAddLps} successful Add LPs.`, "success");
+      }
+
+      if (!shouldStop) {
+        const randomDelay = Math.floor(Math.random() * (12000 - 8000 + 1)) + 8000;
+        addLog(`Account ${accountIndex + 1}: Waiting ${Math.floor(randomDelay / 1000)} seconds before next process...`, "wait");
+        await sleep(randomDelay);
+      }
+
+      if (!shouldStop && accountJwts[wallet.address]) {
+        try {
+          const checkinUrl = `${API_BASE_URL}/sign/in?address=${wallet.address}`;
+          const checkinResponse = await makeApiRequest(
+            "post",
+            checkinUrl,
+            {},
+            proxyUrl,
+            { "Authorization": `Bearer ${accountJwts[wallet.address].pharosJwt}` },
+            3,
+            2000,
+            true
+          );
+          if (checkinResponse.code === 0) {
+            addLog(`Account ${accountIndex + 1}: Daily check-in successful.`, "success");
+          } else {
+            addLog(`Account ${accountIndex + 1}: Check-in failed: ${checkinResponse.msg}`, "error");
+          }
+        } catch (error) {
+          addLog(`Account ${accountIndex + 1}: Check-in error: ${error.message}`, "error");
+        }
+      }
+
+      if (accountIndex < privateKeys.length - 1 && !shouldStop) {
+        addLog(`Waiting 60 seconds before next account...`, "wait");
+        await sleep(60000);
+      }
+    }
+    if (!shouldStop && activeProcesses <= 0) {
+      addLog("All accounts processed. Waiting 24 hours for next cycle.", "success");
+      dailyActivityInterval = setTimeout(runDailyActivity, 24 * 60 * 60 * 1000);
+    }
+  } catch (error) {
+    addLog(`Daily activity failed: ${error.message}`, "error");
+  } finally {
+    if (shouldStop) {
+      const stopCheckInterval = setInterval(() => {
+        if (activeProcesses <= 0) {
+          clearInterval(stopCheckInterval);
+          activityRunning = false;
+          isCycleRunning = false;
+          shouldStop = false;
+          hasLoggedSleepInterrupt = false;
+          activeProcesses = 0;
+          addLog(`Daily activity stopped successfully.`, "success");
+          updateMenu();
+          updateStatus();
+          safeRender();
+        } else {
+          addLog(`Waiting for ${activeProcesses} process to complete...`, "info");
+        }
+      }, 1000);
+    } else {
+      activityRunning = false;
+      isCycleRunning = activeProcesses > 0 || dailyActivityInterval !== null;
+      updateMenu();
+      updateStatus();
+      safeRender();
+    }
+    nonceTracker = {};
+  }
+}
+
+const screen = blessed.screen({
+  smartCSR: true,
+  title: "PHAROS ATLANTIC AUTO BOT",
+  autoPadding: true,
+  fullUnicode: true,
+  mouse: true,
+  ignoreLocked: ["C-c", "q", "escape"]
+});
+
+const headerBox = blessed.box({
+  top: 0,
+  left: "center",
+  width: "100%",
+  height: 6,
+  tags: true,
+  style: { fg: "yellow", bg: "default" }
+});
+
+const statusBox = blessed.box({
+  left: 0,
+  top: 6,
+  width: "100%",
+  height: 3,
+  tags: true,
+  border: { type: "line", fg: "cyan" },
+  style: { fg: "white", bg: "default", border: { fg: "cyan" } },
+  content: "Status: Initializing...",
+  padding: { left: 1, right: 1, top: 0, bottom: 0 },
+  label: " Status ",
+  wrap: true
+});
+
+const walletBox = blessed.list({
+  label: " Wallet Information ",
+  top: 9,
+  left: 0,
+  width: "40%",
+  height: "35%",
+  border: { type: "line", fg: "cyan" },
+  style: { border: { fg: "cyan" }, fg: "white", bg: "default", item: { fg: "white" } },
+  scrollable: true,
+  scrollbar: { bg: "cyan", fg: "black" },
+  padding: { left: 1, right: 1, top: 0, bottom: 0 },
+  tags: true,
+  keys: true,
+  vi: true,
+  mouse: true,
+  content: "Loading wallet data..."
+});
+
+const logBox = blessed.log({
+  label: " Transaction Logs ",
+  top: 9,
+  left: "41%",
+  width: "60%",
+  height: "100%-9",
+  border: { type: "line" },
+  scrollable: true,
+  alwaysScroll: true,
+  mouse: true,
+  keys: true,
+  vi: true,
+  tags: true,
+  scrollbar: { ch: " ", inverse: true, style: { bg: "cyan" } },
+  content: "",
+  style: { border: { fg: "magenta" }, bg: "default" },
+  padding: { left: 1, right: 1, top: 0, bottom: 0 },
+  wrap: true
+});
+
+const menuBox = blessed.list({
+  label: " Menu ",
+  top: "44%",
+  left: 0,
+  width: "40%",
+  height: "56%",
+  keys: true,
+  vi: true,
+  mouse: true,
+  border: { type: "line" },
+  style: { fg: "white", bg: "default", border: { fg: "red" }, selected: { bg: "magenta", fg: "black" }, item: { fg: "white" } },
+  items: isCycleRunning
+    ? ["Stop Activity", "Set Manual Config", "Clear Logs", "Refresh", "Exit"]
+    : ["Start Auto Daily Activity", "Set Manual Config", "Clear Logs", "Refresh", "Exit"],
+  padding: { left: 1, top: 1 }
+});
+
+const dailyActivitySubMenu = blessed.list({
+  label: " Manual Config Options ",
+  top: "44%",
+  left: 0,
+  width: "40%",
+  height: "56%",
+  keys: true,
+  vi: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" },
+    selected: { bg: "blue", fg: "black" },
+    item: { fg: "white" }
+  },
+  items: ["Set Send PHRS Config", "Set Send Amount Config", "Set Swap Config", "Set USDT Swap Amount Config", "Set CASH+ Swap Amount Config", "Set Faros Swap Config", "Set PHRS Faros Amount Config", "Set USDT Faros Amount Config", "Set Add LP Config", "Set Add LP Amount Config", "Back to Main Menu"],
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const repetitionsForm = blessed.form({
+  label: " Enter Repetitions Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "30%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const repetitionsInput = blessed.textbox({
+  parent: repetitionsForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const repetitionsSubmitButton = blessed.button({
+  parent: repetitionsForm,
+  top: 5,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const sendAmountConfigForm = blessed.form({
+  label: " Set Send Amount Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "50%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const minAmountInput = blessed.textbox({
+  parent: sendAmountConfigForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Min Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const maxAmountInput = blessed.textbox({
+  parent: sendAmountConfigForm,
+  top: 5,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Max Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const sendAmountSubmitButton = blessed.button({
+  parent: sendAmountConfigForm,
+  top: 9,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const swapRepetitionsForm = blessed.form({
+  label: " Enter Swap Repetitions ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "30%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const swapRepetitionsInput = blessed.textbox({
+  parent: swapRepetitionsForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const swapRepetitionsSubmitButton = blessed.button({
+  parent: swapRepetitionsForm,
+  top: 5,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const usdtSwapAmountConfigForm = blessed.form({
+  label: " Set USDT Swap Amount Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "50%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const minUsdtSwapAmountInput = blessed.textbox({
+  parent: usdtSwapAmountConfigForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Min USDT Swap Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const maxUsdtSwapAmountInput = blessed.textbox({
+  parent: usdtSwapAmountConfigForm,
+  top: 5,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Max USDT Swap Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const usdtSwapAmountSubmitButton = blessed.button({
+  parent: usdtSwapAmountConfigForm,
+  top: 9,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const cashSwapAmountConfigForm = blessed.form({
+  label: " Set CASH+ Swap Amount Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "50%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const minCashSwapAmountInput = blessed.textbox({
+  parent: cashSwapAmountConfigForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Min CASH+ Swap Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const maxCashSwapAmountInput = blessed.textbox({
+  parent: cashSwapAmountConfigForm,
+  top: 5,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Max CASH+ Swap Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const cashSwapAmountSubmitButton = blessed.button({
+  parent: cashSwapAmountConfigForm,
+  top: 9,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const farosRepetitionsForm = blessed.form({
+  label: " Enter Faros Repetitions ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "30%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const farosRepetitionsInput = blessed.textbox({
+  parent: farosRepetitionsForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const farosRepetitionsSubmitButton = blessed.button({
+  parent: farosRepetitionsForm,
+  top: 5,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const phrsFarosAmountConfigForm = blessed.form({
+  label: " Set PHRS Faros Amount Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "50%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const minPhrsFarosAmountInput = blessed.textbox({
+  parent: phrsFarosAmountConfigForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Min PHRS Faros Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const maxPhrsFarosAmountInput = blessed.textbox({
+  parent: phrsFarosAmountConfigForm,
+  top: 5,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Max PHRS Faros Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const phrsFarosAmountSubmitButton = blessed.button({
+  parent: phrsFarosAmountConfigForm,
+  top: 9,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const usdtFarosAmountConfigForm = blessed.form({
+  label: " Set USDT Faros Amount Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "50%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const minUsdtFarosAmountInput = blessed.textbox({
+  parent: usdtFarosAmountConfigForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Min USDT Faros Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const maxUsdtFarosAmountInput = blessed.textbox({
+  parent: usdtFarosAmountConfigForm,
+  top: 5,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Max USDT Faros Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const usdtFarosAmountSubmitButton = blessed.button({
+  parent: usdtFarosAmountConfigForm,
+  top: 9,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const addLpRepetitionsForm = blessed.form({
+  label: " Enter Add LP Repetitions ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "30%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const addLpRepetitionsInput = blessed.textbox({
+  parent: addLpRepetitionsForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const addLpRepetitionsSubmitButton = blessed.button({
+  parent: addLpRepetitionsForm,
+  top: 5,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+const addLpAmountConfigForm = blessed.form({
+  label: " Set Add LP Amount Config ",
+  top: "center",
+  left: "center",
+  width: "30%",
+  height: "50%",
+  keys: true,
+  mouse: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "blue" }
+  },
+  padding: { left: 1, top: 1 },
+  hidden: true
+});
+
+const minAddLpAmountInput = blessed.textbox({
+  parent: addLpAmountConfigForm,
+  top: 1,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Min Add LP Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const maxAddLpAmountInput = blessed.textbox({
+  parent: addLpAmountConfigForm,
+  top: 5,
+  left: 1,
+  width: "90%",
+  height: 3,
+  label: "Max Add LP Amount",
+  inputOnFocus: true,
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "white" },
+    focus: { border: { fg: "green" } }
+  }
+});
+
+const addLpAmountSubmitButton = blessed.button({
+  parent: addLpAmountConfigForm,
+  top: 9,
+  left: "center",
+  width: 10,
+  height: 3,
+  content: "Submit",
+  align: "center",
+  border: { type: "line" },
+  style: {
+    fg: "white",
+    bg: "blue",
+    border: { fg: "white" },
+    hover: { bg: "green" },
+    focus: { bg: "green" }
+  }
+});
+
+screen.append(headerBox);
+screen.append(statusBox);
+screen.append(walletBox);
+screen.append(logBox);
+screen.append(menuBox);
+screen.append(dailyActivitySubMenu);
+screen.append(repetitionsForm);
+screen.append(sendAmountConfigForm);
+screen.append(swapRepetitionsForm);
+screen.append(usdtSwapAmountConfigForm);
+screen.append(cashSwapAmountConfigForm);
+screen.append(farosRepetitionsForm);
+screen.append(phrsFarosAmountConfigForm);
+screen.append(usdtFarosAmountConfigForm);
+screen.append(addLpRepetitionsForm);
+screen.append(addLpAmountConfigForm);
+
+if (!global.__neuraHandlersAttached) {
+  global.__neuraHandlersAttached = true;
+
+  function safeRemoveListeners(el, ev) {
+    if (!el) return;
+    if (typeof el.removeAllListeners === "function") {
+      try { el.removeAllListeners(ev); } catch (e) {}
+    } else if (typeof el.off === "function") {
+      try { el.off(ev); } catch (e) {}
+    }
+  }
+
+  function makeDebouncedHandler(fn, delay = 400) {
+    let timer = null;
+    return (...args) => {
+      if (timer) return;
+      try { fn(...args); } catch(e){}
+      timer = setTimeout(() => { timer = null; }, delay);
+    };
+  }
+
+  try {
+    safeRemoveListeners(sendAmountSubmitButton, "press");
+    safeRemoveListeners(sendAmountSubmitButton, "click");
+    const handleSendSubmit = makeDebouncedHandler(() => {
+      try { if (sendAmountConfigForm && typeof sendAmountConfigForm.submit === "function") sendAmountConfigForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    sendAmountSubmitButton.on("press", handleSendSubmit);
+    sendAmountSubmitButton.on("click", () => { try { screen.focusPush(sendAmountSubmitButton); } catch(e){}; handleSendSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(repetitionsSubmitButton, "press");
+    safeRemoveListeners(repetitionsSubmitButton, "click");
+    const handleRepSubmit = makeDebouncedHandler(() => {
+      try { if (repetitionsForm && typeof repetitionsForm.submit === "function") repetitionsForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    repetitionsSubmitButton.on("press", handleRepSubmit);
+    repetitionsSubmitButton.on("click", () => { try { screen.focusPush(repetitionsSubmitButton); } catch(e){}; handleRepSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(swapRepetitionsSubmitButton, "press");
+    safeRemoveListeners(swapRepetitionsSubmitButton, "click");
+    const handleSwapRepSubmit = makeDebouncedHandler(() => {
+      try { if (swapRepetitionsForm && typeof swapRepetitionsForm.submit === "function") swapRepetitionsForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    swapRepetitionsSubmitButton.on("press", handleSwapRepSubmit);
+    swapRepetitionsSubmitButton.on("click", () => { try { screen.focusPush(swapRepetitionsSubmitButton); } catch(e){}; handleSwapRepSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(usdtSwapAmountSubmitButton, "press");
+    safeRemoveListeners(usdtSwapAmountSubmitButton, "click");
+    const handleUsdtSwapAmountSubmit = makeDebouncedHandler(() => {
+      try { if (usdtSwapAmountConfigForm && typeof usdtSwapAmountConfigForm.submit === "function") usdtSwapAmountConfigForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    usdtSwapAmountSubmitButton.on("press", handleUsdtSwapAmountSubmit);
+    usdtSwapAmountSubmitButton.on("click", () => { try { screen.focusPush(usdtSwapAmountSubmitButton); } catch(e){}; handleUsdtSwapAmountSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(cashSwapAmountSubmitButton, "press");
+    safeRemoveListeners(cashSwapAmountSubmitButton, "click");
+    const handleCashSwapAmountSubmit = makeDebouncedHandler(() => {
+      try { if (cashSwapAmountConfigForm && typeof cashSwapAmountConfigForm.submit === "function") cashSwapAmountConfigForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    cashSwapAmountSubmitButton.on("press", handleCashSwapAmountSubmit);
+    cashSwapAmountSubmitButton.on("click", () => { try { screen.focusPush(cashSwapAmountSubmitButton); } catch(e){}; handleCashSwapAmountSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(farosRepetitionsSubmitButton, "press");
+    safeRemoveListeners(farosRepetitionsSubmitButton, "click");
+    const handleFarosRepSubmit = makeDebouncedHandler(() => {
+      try { if (farosRepetitionsForm && typeof farosRepetitionsForm.submit === "function") farosRepetitionsForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    farosRepetitionsSubmitButton.on("press", handleFarosRepSubmit);
+    farosRepetitionsSubmitButton.on("click", () => { try { screen.focusPush(farosRepetitionsSubmitButton); } catch(e){}; handleFarosRepSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(phrsFarosAmountSubmitButton, "press");
+    safeRemoveListeners(phrsFarosAmountSubmitButton, "click");
+    const handlePhrsFarosAmountSubmit = makeDebouncedHandler(() => {
+      try { if (phrsFarosAmountConfigForm && typeof phrsFarosAmountConfigForm.submit === "function") phrsFarosAmountConfigForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    phrsFarosAmountSubmitButton.on("press", handlePhrsFarosAmountSubmit);
+    phrsFarosAmountSubmitButton.on("click", () => { try { screen.focusPush(phrsFarosAmountSubmitButton); } catch(e){}; handlePhrsFarosAmountSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(usdtFarosAmountSubmitButton, "press");
+    safeRemoveListeners(usdtFarosAmountSubmitButton, "click");
+    const handleUsdtFarosAmountSubmit = makeDebouncedHandler(() => {
+      try { if (usdtFarosAmountConfigForm && typeof usdtFarosAmountConfigForm.submit === "function") usdtFarosAmountConfigForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    usdtFarosAmountSubmitButton.on("press", handleUsdtFarosAmountSubmit);
+    usdtFarosAmountSubmitButton.on("click", () => { try { screen.focusPush(usdtFarosAmountSubmitButton); } catch(e){}; handleUsdtFarosAmountSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(addLpRepetitionsSubmitButton, "press");
+    safeRemoveListeners(addLpRepetitionsSubmitButton, "click");
+    const handleAddLpRepSubmit = makeDebouncedHandler(() => {
+      try { if (addLpRepetitionsForm && typeof addLpRepetitionsForm.submit === "function") addLpRepetitionsForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    addLpRepetitionsSubmitButton.on("press", handleAddLpRepSubmit);
+    addLpRepetitionsSubmitButton.on("click", () => { try { screen.focusPush(addLpRepetitionsSubmitButton); } catch(e){}; handleAddLpRepSubmit(); });
+  } catch(e){}
+
+  try {
+    safeRemoveListeners(addLpAmountSubmitButton, "press");
+    safeRemoveListeners(addLpAmountSubmitButton, "click");
+    const handleAddLpAmountSubmit = makeDebouncedHandler(() => {
+      try { if (addLpAmountConfigForm && typeof addLpAmountConfigForm.submit === "function") addLpAmountConfigForm.submit(); } catch(e){}
+      try { screen.render(); } catch(e){}
+    }, 400);
+    addLpAmountSubmitButton.on("press", handleAddLpAmountSubmit);
+    addLpAmountSubmitButton.on("click", () => { try { screen.focusPush(addLpAmountSubmitButton); } catch(e){}; handleAddLpAmountSubmit(); });
+  } catch(e){}
+}
+
+
+let renderQueue = [];
+let isRendering = false;
+function safeRender() {
+  renderQueue.push(true);
+  if (isRendering) return;
+  isRendering = true;
+  setTimeout(() => {
+    try {
+      if (!isHeaderRendered) {
+        figlet.text("NT EXHAUST", { font: "ANSI Shadow" }, (err, data) => {
+          if (!err) headerBox.setContent(`{center}{bold}{cyan-fg}${data}{/cyan-fg}{/bold}{/center}`);
+          isHeaderRendered = true;
+        });
+      }
+      screen.render();
+    } catch (error) {
+      addLog(`UI render error: ${error.message}`, "error");
+    }
+    renderQueue.shift();
+    isRendering = false;
+    if (renderQueue.length > 0) safeRender();
+  }, 100);
+}
+
+function adjustLayout() {
+  const screenHeight = screen.height || 24;
+  const screenWidth = screen.width || 80;
+
+  headerBox.height = Math.max(6, Math.floor(screenHeight * 0.15));
+  statusBox.top = headerBox.height;
+  statusBox.height = Math.max(3, Math.floor(screenHeight * 0.07));
+
+  walletBox.top = headerBox.height + statusBox.height;
+  walletBox.width = Math.floor(screenWidth * 0.4);
+  walletBox.height = Math.floor(screenHeight * 0.35);
+
+  logBox.top = headerBox.height + statusBox.height;
+  logBox.left = Math.floor(screenWidth * 0.41);
+  logBox.width = Math.floor(screenWidth * 0.6);
+  logBox.height = screenHeight - (headerBox.height + statusBox.height);
+
+  menuBox.top = headerBox.height + statusBox.height + walletBox.height;
+  menuBox.width = Math.floor(screenWidth * 0.4);
+  menuBox.height = screenHeight - (headerBox.height + statusBox.height + walletBox.height);
+
+  if (menuBox.top != null) {
+    dailyActivitySubMenu.top = menuBox.top;
+    dailyActivitySubMenu.width = menuBox.width;
+    dailyActivitySubMenu.height = menuBox.height;
+    dailyActivitySubMenu.left = menuBox.left;
+    repetitionsForm.width = Math.floor(screenWidth * 0.3);
+    repetitionsForm.height = Math.floor(screenHeight * 0.3);
+    sendAmountConfigForm.width = Math.floor(screenWidth * 0.3);
+    sendAmountConfigForm.height = Math.floor(screenHeight * 0.5);
+    swapRepetitionsForm.width = Math.floor(screenWidth * 0.3);
+    swapRepetitionsForm.height = Math.floor(screenHeight * 0.3);
+    usdtSwapAmountConfigForm.width = Math.floor(screenWidth * 0.3);
+    usdtSwapAmountConfigForm.height = Math.floor(screenHeight * 0.5);
+    cashSwapAmountConfigForm.width = Math.floor(screenWidth * 0.3);
+    cashSwapAmountConfigForm.height = Math.floor(screenHeight * 0.5);
+    farosRepetitionsForm.width = Math.floor(screenWidth * 0.3);
+    farosRepetitionsForm.height = Math.floor(screenHeight * 0.3);
+    phrsFarosAmountConfigForm.width = Math.floor(screenWidth * 0.3);
+    phrsFarosAmountConfigForm.height = Math.floor(screenHeight * 0.5);
+    usdtFarosAmountConfigForm.width = Math.floor(screenWidth * 0.3);
+    usdtFarosAmountConfigForm.height = Math.floor(screenHeight * 0.5);
+    addLpRepetitionsForm.width = Math.floor(screenWidth * 0.3);
+    addLpRepetitionsForm.height = Math.floor(screenHeight * 0.3);
+    addLpAmountConfigForm.width = Math.floor(screenWidth * 0.3);
+    addLpAmountConfigForm.height = Math.floor(screenHeight * 0.5);
+  }
+
+  safeRender();
+}
+
+function updateStatus() {
+  const isProcessing = activityRunning || isCycleRunning;
+  const status = activityRunning
+    ? `${loadingSpinner[spinnerIndex]} {yellow-fg}Running{/yellow-fg}`
+    : isCycleRunning
+      ? `${loadingSpinner[spinnerIndex]} {yellow-fg}Waiting for next cycle{/yellow-fg}`
+      : "{green-fg}Idle{/green-fg}";
+  const statusText = `Status: ${status} | Active Account: ${getShortAddress(walletInfo.address)} | Total Accounts: ${privateKeys.length} | Send: ${dailyActivityConfig.sendPhrsRepetitions}x | Swap: ${dailyActivityConfig.swapRepetitions}x | Faros: ${dailyActivityConfig.farosSwapRepetitions}x | Add LP: ${dailyActivityConfig.addLpRepetitions}x`;
+  try {
+    statusBox.setContent(statusText);
+  } catch (error) {
+    addLog(`Status update error: ${error.message}`, "error");
+  }
+  if (isProcessing) {
+    if (blinkCounter % 1 === 0) {
+      statusBox.style.border.fg = borderBlinkColors[borderBlinkIndex];
+      borderBlinkIndex = (borderBlinkIndex + 1) % borderBlinkColors.length;
+    }
+    blinkCounter++;
+  } else {
+    statusBox.style.border.fg = "cyan";
+  }
+  spinnerIndex = (spinnerIndex + 1) % loadingSpinner.length;
+  safeRender();
+}
+
+async function updateWallets() {
+  const walletData = await updateWalletData();
+  const header = `{bold}{cyan-fg}     Address{/cyan-fg}{/bold}       {bold}{cyan-fg}PHRs{/cyan-fg}{/bold}       {bold}{cyan-fg}USDT{/cyan-fg}{/bold}       {bold}{cyan-fg}CASH+{/cyan-fg}{/bold}       {bold}{cyan-fg}WPHRS{/cyan-fg}{/bold}`;
+  const separator = "{grey-fg}-----------------------------------------------------------------------------{/grey-fg}";
+  try {
+    walletBox.setItems([header, separator, ...walletData]);
+    walletBox.select(0);
+  } catch (error) {
+    addLog(`Wallet update error: ${error.message}`, "error");
+  }
+  safeRender();
+}
+
+function updateLogs() {
+  try {
+    logBox.setContent(transactionLogs.join("\n") || "{grey-fg}Tidak ada log tersedia.{/grey-fg}");
+    logBox.setScrollPerc(100);
+  } catch (error) {
+    addLog(`Log update error: ${error.message}`, "error");
+  }
+  safeRender();
+}
+
+function updateMenu() {
+  try {
+    menuBox.setItems(
+      isCycleRunning
+        ? ["Stop Activity", "Set Manual Config", "Clear Logs", "Refresh", "Exit"]
+        : ["Start Auto Daily Activity", "Set Manual Config", "Clear Logs", "Refresh", "Exit"]
+    );
+  } catch (error) {
+    addLog(`Menu update error: ${error.message}`, "error");
+  }
+  safeRender();
+}
+
+const statusInterval = setInterval(updateStatus, 100);
+
+menuBox.on("select", async item => {
+  const action = item.getText();
+  switch (action) {
+    case "Start Auto Daily Activity":
+      if (isCycleRunning) {
+        addLog("Cycle is still running. Stop the current cycle first.", "error");
+      } else {
+        await runDailyActivity();
+      }
+      break;
+    case "Stop Activity":
+      shouldStop = true;
+      if (dailyActivityInterval) {
+        clearTimeout(dailyActivityInterval);
+        dailyActivityInterval = null;
+      }
+      addLog("Stopping daily activity... Please wait for ongoing processes to complete.", "info");
+      const stopCheckInterval = setInterval(() => {
+        if (activeProcesses <= 0) {
+          clearInterval(stopCheckInterval);
+          activityRunning = false;
+          isCycleRunning = false;
+          shouldStop = false;
+          hasLoggedSleepInterrupt = false;
+          activeProcesses = 0;
+          addLog(`Daily activity stopped successfully.`, "success");
+          updateMenu();
+          updateStatus();
+          safeRender();
+        } else {
+          addLog(`Waiting for ${activeProcesses} process to complete...`, "info");
+        }
+      }, 1000);
+      break;
+    case "Set Manual Config":
+      menuBox.hide();
+      dailyActivitySubMenu.show();
+      setTimeout(() => {
+        if (dailyActivitySubMenu.visible) {
+          screen.focusPush(dailyActivitySubMenu);
+          dailyActivitySubMenu.select(0);
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Clear Logs":
+      clearTransactionLogs();
+      break;
+    case "Refresh":
+      await updateWallets();
+      addLog("Data refreshed.", "success");
+      break;
+    case "Exit":
+      clearInterval(statusInterval);
+      process.exit(0);
+  }
+  menuBox.focus();
+  safeRender();
+});
+
+dailyActivitySubMenu.on("select", item => {
+  const action = item.getText();
+  switch (action) {
+    case "Set Send PHRS Config":
+      repetitionsForm.show();
+      repetitionsForm.configType = "sendPhrs";
+      setTimeout(() => {
+        if (repetitionsForm.visible) {
+          screen.focusPush(repetitionsInput);
+          repetitionsInput.setValue(dailyActivityConfig.sendPhrsRepetitions.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set Send Amount Config":
+      sendAmountConfigForm.show();
+      setTimeout(() => {
+        if (sendAmountConfigForm.visible) {
+          screen.focusPush(minAmountInput);
+          minAmountInput.setValue(dailyActivityConfig.minSendAmount.toString());
+          maxAmountInput.setValue(dailyActivityConfig.maxSendAmount.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set Swap Config":
+      swapRepetitionsForm.show();
+      swapRepetitionsForm.configType = "swap";
+      setTimeout(() => {
+        if (swapRepetitionsForm.visible) {
+          screen.focusPush(swapRepetitionsInput);
+          swapRepetitionsInput.setValue(dailyActivityConfig.swapRepetitions.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set USDT Swap Amount Config":
+      usdtSwapAmountConfigForm.show();
+      setTimeout(() => {
+        if (usdtSwapAmountConfigForm.visible) {
+          screen.focusPush(minUsdtSwapAmountInput);
+          minUsdtSwapAmountInput.setValue(dailyActivityConfig.minUsdtSwapAmount.toString());
+          maxUsdtSwapAmountInput.setValue(dailyActivityConfig.maxUsdtSwapAmount.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set CASH+ Swap Amount Config":
+      cashSwapAmountConfigForm.show();
+      setTimeout(() => {
+        if (cashSwapAmountConfigForm.visible) {
+          screen.focusPush(minCashSwapAmountInput);
+          minCashSwapAmountInput.setValue(dailyActivityConfig.minCashSwapAmount.toString());
+          maxCashSwapAmountInput.setValue(dailyActivityConfig.maxCashSwapAmount.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set Faros Swap Config":
+      farosRepetitionsForm.show();
+      farosRepetitionsForm.configType = "faros";
+      setTimeout(() => {
+        if (farosRepetitionsForm.visible) {
+          screen.focusPush(farosRepetitionsInput);
+          farosRepetitionsInput.setValue(dailyActivityConfig.farosSwapRepetitions.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set PHRS Faros Amount Config":
+      phrsFarosAmountConfigForm.show();
+      setTimeout(() => {
+        if (phrsFarosAmountConfigForm.visible) {
+          screen.focusPush(minPhrsFarosAmountInput);
+          minPhrsFarosAmountInput.setValue(dailyActivityConfig.minPhrsSwapAmount.toString());
+          maxPhrsFarosAmountInput.setValue(dailyActivityConfig.maxPhrsSwapAmount.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set USDT Faros Amount Config":
+      usdtFarosAmountConfigForm.show();
+      setTimeout(() => {
+        if (usdtFarosAmountConfigForm.visible) {
+          screen.focusPush(minUsdtFarosAmountInput);
+          minUsdtFarosAmountInput.setValue(dailyActivityConfig.minUsdtFarosSwapAmount.toString());
+          maxUsdtFarosAmountInput.setValue(dailyActivityConfig.maxUsdtFarosSwapAmount.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set Add LP Config":
+      addLpRepetitionsForm.show();
+      addLpRepetitionsForm.configType = "addLp";
+      setTimeout(() => {
+        if (addLpRepetitionsForm.visible) {
+          screen.focusPush(addLpRepetitionsInput);
+          addLpRepetitionsInput.setValue(dailyActivityConfig.addLpRepetitions.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Set Add LP Amount Config":
+      addLpAmountConfigForm.show();
+      setTimeout(() => {
+        if (addLpAmountConfigForm.visible) {
+          screen.focusPush(minAddLpAmountInput);
+          minAddLpAmountInput.setValue(dailyActivityConfig.minAddLpAmount.toString());
+          maxAddLpAmountInput.setValue(dailyActivityConfig.maxAddLpAmount.toString());
+          safeRender();
+        }
+      }, 100);
+      break;
+    case "Back to Main Menu":
+      dailyActivitySubMenu.hide();
+      menuBox.show();
+      setTimeout(() => {
+        if (menuBox.visible) {
+          screen.focusPush(menuBox);
+          menuBox.select(0);
+          safeRender();
+        }
+      }, 100);
+      break;
+  }
+});
+
+repetitionsInput.key(["enter"], () => {
+  repetitionsForm.submit();
+});
+
+repetitionsForm.on("submit", () => {
+  const repetitionsText = repetitionsInput.getValue().trim();
+  let repetitions;
+  try {
+    repetitions = parseInt(repetitionsText, 10);
+    if (isNaN(repetitions) || repetitions < 1 || repetitions > 1000) {
+      addLog("Invalid input. Please enter a number between 1 and 1000.", "error");
+      repetitionsInput.setValue("");
+      screen.focusPush(repetitionsInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    repetitionsInput.setValue("");
+    screen.focusPush(repetitionsInput);
+    safeRender();
+    return;
+  }
+
+  if (repetitionsForm.configType === "sendPhrs") {
+    dailyActivityConfig.sendPhrsRepetitions = repetitions;
+    addLog(`Send PHRS Config set to ${repetitions}`, "success");
+  }
+  saveConfig();
+  updateStatus();
+
+  repetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+repetitionsSubmitButton.on("press", () => {
+  repetitionsForm.submit();
+});
+
+repetitionsForm.key(["escape"], () => {
+  repetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+minAmountInput.key(["enter"], () => {
+  screen.focusPush(maxAmountInput);
+});
+
+maxAmountInput.key(["enter"], () => {
+  sendAmountConfigForm.submit();
+});
+
+sendAmountSubmitButton.on("press", () => {
+  sendAmountConfigForm.submit();
+});
+
+sendAmountConfigForm.on("submit", () => {
+  const minText = minAmountInput.getValue().trim();
+  const maxText = maxAmountInput.getValue().trim();
+  let minAmount, maxAmount;
+  try {
+    minAmount = parseFloat(minText);
+    maxAmount = parseFloat(maxText);
+    if (isNaN(minAmount) || isNaN(maxAmount) || minAmount <= 0 || maxAmount <= 0 || minAmount >= maxAmount) {
+      addLog("Invalid input. Min and Max must be positive numbers with Min < Max.", "error");
+      minAmountInput.setValue("");
+      maxAmountInput.setValue("");
+      screen.focusPush(minAmountInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    minAmountInput.setValue("");
+    maxAmountInput.setValue("");
+    screen.focusPush(minAmountInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.minSendAmount = minAmount;
+  dailyActivityConfig.maxSendAmount = maxAmount;
+  addLog(`Send Amount Config set to Min: ${minAmount}, Max: ${maxAmount}`, "success");
+  saveConfig();
+  updateStatus();
+
+  sendAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+sendAmountConfigForm.key(["escape"], () => {
+  sendAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+swapRepetitionsInput.key(["enter"], () => {
+  swapRepetitionsForm.submit();
+});
+
+swapRepetitionsForm.on("submit", () => {
+  const repetitionsText = swapRepetitionsInput.getValue().trim();
+  let repetitions;
+  try {
+    repetitions = parseInt(repetitionsText, 10);
+    if (isNaN(repetitions) || repetitions < 1 || repetitions > 1000) {
+      addLog("Invalid input. Please enter a number between 1 and 1000.", "error");
+      swapRepetitionsInput.setValue("");
+      screen.focusPush(swapRepetitionsInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    swapRepetitionsInput.setValue("");
+    screen.focusPush(swapRepetitionsInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.swapRepetitions = repetitions;
+  addLog(`Swap Config set to ${repetitions}`, "success");
+  saveConfig();
+  updateStatus();
+
+  swapRepetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+swapRepetitionsSubmitButton.on("press", () => {
+  swapRepetitionsForm.submit();
+});
+
+swapRepetitionsForm.key(["escape"], () => {
+  swapRepetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+minUsdtSwapAmountInput.key(["enter"], () => {
+  screen.focusPush(maxUsdtSwapAmountInput);
+});
+
+maxUsdtSwapAmountInput.key(["enter"], () => {
+  usdtSwapAmountConfigForm.submit();
+});
+
+usdtSwapAmountSubmitButton.on("press", () => {
+  usdtSwapAmountConfigForm.submit();
+});
+
+usdtSwapAmountConfigForm.on("submit", () => {
+  const minText = minUsdtSwapAmountInput.getValue().trim();
+  const maxText = maxUsdtSwapAmountInput.getValue().trim();
+  let minAmount, maxAmount;
+  try {
+    minAmount = parseFloat(minText);
+    maxAmount = parseFloat(maxText);
+    if (isNaN(minAmount) || isNaN(maxAmount) || minAmount <= 0 || maxAmount <= 0 || minAmount >= maxAmount) {
+      addLog("Invalid input. Min and Max must be positive numbers with Min < Max.", "error");
+      minUsdtSwapAmountInput.setValue("");
+      maxUsdtSwapAmountInput.setValue("");
+      screen.focusPush(minUsdtSwapAmountInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    minUsdtSwapAmountInput.setValue("");
+    maxUsdtSwapAmountInput.setValue("");
+    screen.focusPush(minUsdtSwapAmountInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.minUsdtSwapAmount = minAmount;
+  dailyActivityConfig.maxUsdtSwapAmount = maxAmount;
+  addLog(`USDT Swap Amount Config set to Min: ${minAmount}, Max: ${maxAmount}`, "success");
+  saveConfig();
+  updateStatus();
+
+  usdtSwapAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+usdtSwapAmountConfigForm.key(["escape"], () => {
+  usdtSwapAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+minCashSwapAmountInput.key(["enter"], () => {
+  screen.focusPush(maxCashSwapAmountInput);
+});
+
+maxCashSwapAmountInput.key(["enter"], () => {
+  cashSwapAmountConfigForm.submit();
+});
+
+cashSwapAmountSubmitButton.on("press", () => {
+  cashSwapAmountConfigForm.submit();
+});
+
+cashSwapAmountConfigForm.on("submit", () => {
+  const minText = minCashSwapAmountInput.getValue().trim();
+  const maxText = maxCashSwapAmountInput.getValue().trim();
+  let minAmount, maxAmount;
+  try {
+    minAmount = parseFloat(minText);
+    maxAmount = parseFloat(maxText);
+    if (isNaN(minAmount) || isNaN(maxAmount) || minAmount <= 0 || maxAmount <= 0 || minAmount >= maxAmount) {
+      addLog("Invalid input. Min and Max must be positive numbers with Min < Max.", "error");
+      minCashSwapAmountInput.setValue("");
+      maxCashSwapAmountInput.setValue("");
+      screen.focusPush(minCashSwapAmountInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    minCashSwapAmountInput.setValue("");
+    maxCashSwapAmountInput.setValue("");
+    screen.focusPush(minCashSwapAmountInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.minCashSwapAmount = minAmount;
+  dailyActivityConfig.maxCashSwapAmount = maxAmount;
+  addLog(`CASH+ Swap Amount Config set to Min: ${minAmount}, Max: ${maxAmount}`, "success");
+  saveConfig();
+  updateStatus();
+
+  cashSwapAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+cashSwapAmountConfigForm.key(["escape"], () => {
+  cashSwapAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+farosRepetitionsInput.key(["enter"], () => {
+  farosRepetitionsForm.submit();
+});
+
+farosRepetitionsForm.on("submit", () => {
+  const repetitionsText = farosRepetitionsInput.getValue().trim();
+  let repetitions;
+  try {
+    repetitions = parseInt(repetitionsText, 10);
+    if (isNaN(repetitions) || repetitions < 1 || repetitions > 1000) {
+      addLog("Invalid input. Please enter a number between 1 and 1000.", "error");
+      farosRepetitionsInput.setValue("");
+      screen.focusPush(farosRepetitionsInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    farosRepetitionsInput.setValue("");
+    screen.focusPush(farosRepetitionsInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.farosSwapRepetitions = repetitions;
+  addLog(`Faros Swap Config set to ${repetitions}`, "success");
+  saveConfig();
+  updateStatus();
+
+  farosRepetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+farosRepetitionsSubmitButton.on("press", () => {
+  farosRepetitionsForm.submit();
+});
+
+farosRepetitionsForm.key(["escape"], () => {
+  farosRepetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+minPhrsFarosAmountInput.key(["enter"], () => {
+  screen.focusPush(maxPhrsFarosAmountInput);
+});
+
+maxPhrsFarosAmountInput.key(["enter"], () => {
+  phrsFarosAmountConfigForm.submit();
+});
+
+phrsFarosAmountSubmitButton.on("press", () => {
+  phrsFarosAmountConfigForm.submit();
+});
+
+phrsFarosAmountConfigForm.on("submit", () => {
+  const minText = minPhrsFarosAmountInput.getValue().trim();
+  const maxText = maxPhrsFarosAmountInput.getValue().trim();
+  let minAmount, maxAmount;
+  try {
+    minAmount = parseFloat(minText);
+    maxAmount = parseFloat(maxText);
+    if (isNaN(minAmount) || isNaN(maxAmount) || minAmount <= 0 || maxAmount <= 0 || minAmount >= maxAmount) {
+      addLog("Invalid input. Min and Max must be positive numbers with Min < Max.", "error");
+      minPhrsFarosAmountInput.setValue("");
+      maxPhrsFarosAmountInput.setValue("");
+      screen.focusPush(minPhrsFarosAmountInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    minPhrsFarosAmountInput.setValue("");
+    maxPhrsFarosAmountInput.setValue("");
+    screen.focusPush(minPhrsFarosAmountInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.minPhrsSwapAmount = minAmount;
+  dailyActivityConfig.maxPhrsSwapAmount = maxAmount;
+  addLog(`PHRS Faros Amount Config set to Min: ${minAmount}, Max: ${maxAmount}`, "success");
+  saveConfig();
+  updateStatus();
+
+  phrsFarosAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+phrsFarosAmountConfigForm.key(["escape"], () => {
+  phrsFarosAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+minUsdtFarosAmountInput.key(["enter"], () => {
+  screen.focusPush(maxUsdtFarosAmountInput);
+});
+
+maxUsdtFarosAmountInput.key(["enter"], () => {
+  usdtFarosAmountConfigForm.submit();
+});
+
+usdtFarosAmountSubmitButton.on("press", () => {
+  usdtFarosAmountConfigForm.submit();
+});
+
+usdtFarosAmountConfigForm.on("submit", () => {
+  const minText = minUsdtFarosAmountInput.getValue().trim();
+  const maxText = maxUsdtFarosAmountInput.getValue().trim();
+  let minAmount, maxAmount;
+  try {
+    minAmount = parseFloat(minText);
+    maxAmount = parseFloat(maxText);
+    if (isNaN(minAmount) || isNaN(maxAmount) || minAmount <= 0 || maxAmount <= 0 || minAmount >= maxAmount) {
+      addLog("Invalid input. Min and Max must be positive numbers with Min < Max.", "error");
+      minUsdtFarosAmountInput.setValue("");
+      maxUsdtFarosAmountInput.setValue("");
+      screen.focusPush(minUsdtFarosAmountInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    minUsdtFarosAmountInput.setValue("");
+    maxUsdtFarosAmountInput.setValue("");
+    screen.focusPush(minUsdtFarosAmountInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.minUsdtFarosSwapAmount = minAmount;
+  dailyActivityConfig.maxUsdtFarosSwapAmount = maxAmount;
+  addLog(`USDT Faros Amount Config set to Min: ${minAmount}, Max: ${maxAmount}`, "success");
+  saveConfig();
+  updateStatus();
+
+  usdtFarosAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+usdtFarosAmountConfigForm.key(["escape"], () => {
+  usdtFarosAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+addLpRepetitionsInput.key(["enter"], () => {
+  addLpRepetitionsForm.submit();
+});
+
+addLpRepetitionsForm.on("submit", () => {
+  const repetitionsText = addLpRepetitionsInput.getValue().trim();
+  let repetitions;
+  try {
+    repetitions = parseInt(repetitionsText, 10);
+    if (isNaN(repetitions) || repetitions < 1 || repetitions > 1000) {
+      addLog("Invalid input. Please enter a number between 1 and 1000.", "error");
+      addLpRepetitionsInput.setValue("");
+      screen.focusPush(addLpRepetitionsInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    addLpRepetitionsInput.setValue("");
+    screen.focusPush(addLpRepetitionsInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.addLpRepetitions = repetitions;
+  addLog(`Add LP Config set to ${repetitions}`, "success");
+  saveConfig();
+  updateStatus();
+
+  addLpRepetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+addLpRepetitionsSubmitButton.on("press", () => {
+  addLpRepetitionsForm.submit();
+});
+
+addLpRepetitionsForm.key(["escape"], () => {
+  addLpRepetitionsForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+minAddLpAmountInput.key(["enter"], () => {
+  screen.focusPush(maxAddLpAmountInput);
+});
+
+maxAddLpAmountInput.key(["enter"], () => {
+  addLpAmountConfigForm.submit();
+});
+
+addLpAmountSubmitButton.on("press", () => {
+  addLpAmountConfigForm.submit();
+});
+
+addLpAmountConfigForm.on("submit", () => {
+  const minText = minAddLpAmountInput.getValue().trim();
+  const maxText = maxAddLpAmountInput.getValue().trim();
+  let minAmount, maxAmount;
+  try {
+    minAmount = parseFloat(minText);
+    maxAmount = parseFloat(maxText);
+    if (isNaN(minAmount) || isNaN(maxAmount) || minAmount <= 0 || maxAmount <= 0 || minAmount >= maxAmount) {
+      addLog("Invalid input. Min and Max must be positive numbers with Min < Max.", "error");
+      minAddLpAmountInput.setValue("");
+      maxAddLpAmountInput.setValue("");
+      screen.focusPush(minAddLpAmountInput);
+      safeRender();
+      return;
+    }
+  } catch (error) {
+    addLog(`Invalid format: ${error.message}`, "error");
+    minAddLpAmountInput.setValue("");
+    maxAddLpAmountInput.setValue("");
+    screen.focusPush(minAddLpAmountInput);
+    safeRender();
+    return;
+  }
+
+  dailyActivityConfig.minAddLpAmount = minAmount;
+  dailyActivityConfig.maxAddLpAmount = maxAmount;
+  addLog(`Add LP Amount Config set to Min: ${minAmount}, Max: ${maxAmount}`, "success");
+  saveConfig();
+  updateStatus();
+
+  addLpAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+addLpAmountConfigForm.key(["escape"], () => {
+  addLpAmountConfigForm.hide();
+  dailyActivitySubMenu.show();
+  setTimeout(() => {
+    if (dailyActivitySubMenu.visible) {
+      screen.focusPush(dailyActivitySubMenu);
+      dailyActivitySubMenu.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+dailyActivitySubMenu.key(["escape"], () => {
+  dailyActivitySubMenu.hide();
+  menuBox.show();
+  setTimeout(() => {
+    if (menuBox.visible) {
+      screen.focusPush(menuBox);
+      menuBox.select(0);
+      safeRender();
+    }
+  }, 100);
+});
+
+screen.key(["escape", "q", "C-c"], () => {
+  addLog("Exiting application", "info");
+  clearInterval(statusInterval);
+  process.exit(0);
+});
+
+async function initialize() {
+  loadConfig();
+  loadPrivateKeys();
+  loadProxies();
+  walletAddresses = loadWalletAddresses();
+  updateStatus();
+  updateWallets();
+  updateLogs();
+  safeRender();
+  menuBox.focus();
+}
+
+setTimeout(() => {
+  adjustLayout();
+  screen.on("resize", adjustLayout);
+}, 100);
+
+initialize();
